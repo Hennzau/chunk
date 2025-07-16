@@ -1,0 +1,15 @@
+[package]
+name = "chii"
+description = "Graphics related primitives."
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]

@@ -1,0 +1,15 @@
+[package]
+name = "nux"
+description = "2d GUI renderer for human interface design, built on top of wgpu."
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]

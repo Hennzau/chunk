@@ -1,0 +1,24 @@
+[workspace]
+members = ["crates/chii", "crates/hej", "crates/kyo", "crates/nux"]
+resolver = "3"
+
+[workspace.package]
+authors = ["Enzo Le Van <dev@enzo-le-van.fr>"]
+edition = "2024"
+homepage = "https://github.com/Hennzau/kyo"
+keywords = []
+categories = []
+documentation = "https://github.com/Hennzau/kyo"
+license = "Apache-2.0"
+repository = "https://github.com/Hennzau/kyo"
+version = "0.1.0"
+
+[workspace.dependencies]
+chii = { version = "0.1.0", path = "crates/chii" }
+hej = { version = "0.1.0", path = "crates/hej" }
+nux = { version = "0.1.0", path = "crates/nux" }
+kyo = { version = "0.1.0", path = "crates/kyo" }
+
+eyre = "0.6"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"

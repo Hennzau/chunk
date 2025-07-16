@@ -1,0 +1,20 @@
+[package]
+name = "hej"
+description = "ELM architecture widget library, built on top of tokio."
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+documentation.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+chii.workspace = true
+
+eyre.workspace = true
+tokio.workspace = true
+tracing.workspace = true
