@@ -20,5 +20,8 @@ nux = { version = "0.1.0", path = "crates/nux" }
 kyo = { version = "0.1.0", path = "crates/kyo" }
 
 eyre = "0.6"
+
 tokio = { version = "1", features = ["full"] }
+
 tracing = "0.1"
+tracing-subscriber = "0.3"

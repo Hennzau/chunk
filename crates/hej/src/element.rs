@@ -1,5 +1,7 @@
 use std::pin::Pin;
 
+use tokio::sync::mpsc::UnboundedSender;
+
 use crate::prelude::*;
 
 pub struct Element<Message> {
@@ -11,7 +13,11 @@ impl<Message> Element<Message> {
         EmptyWidget {}.element()
     }
 
-    pub async fn on_event(&mut self, event: &Event, client: &Client<Message>) -> Result<()> {
+    pub async fn on_event(
+        &mut self,
+        event: &Event,
+        client: &UnboundedSender<Message>,
+    ) -> Result<()> {
         self.widget.on_event(event, client).await
     }
 
@@ -41,7 +47,7 @@ impl<Message> Widget<Message> for EmptyWidget {
     fn on_event<'a>(
         &'a mut self,
         _event: &'a Event,
-        _client: &'a Client<Message>,
+        _client: &'a UnboundedSender<Message>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
     where
         Self: Sync + 'a,

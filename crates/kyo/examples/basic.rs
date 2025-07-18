@@ -1,58 +1,61 @@
-use kyo::prelude::{reexport::*, *};
+// use kyo::prelude::{reexport::*, *};
 
-use std::{sync::Arc, time::Duration};
+// use std::{sync::Arc, time::Duration};
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    Application::new(State::default(), State::update, State::render)
-        .await?
-        .run(|report| Message::Error(Arc::new(report)))
-        .await
-}
+async fn main() {}
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    EscapePressed,
+// #[tokio::main]
+// async fn main() -> Result<()> {
+//     Application::new(State::default(), State::update, State::render)
+//         .await?
+//         .run(|report| Message::Error(Arc::new(report)))
+//         .await
+// }
 
-    Stop,
+// #[derive(Debug, Clone)]
+// pub enum Message {
+//     EscapePressed,
 
-    Error(Arc<Report>),
-}
+//     Stop,
 
-pub struct State {}
+//     Error(Arc<Report>),
+// }
 
-impl Default for State {
-    fn default() -> Self {
-        Self {}
-    }
-}
+// pub struct State {}
 
-impl State {
-    fn update(&mut self, message: Message) -> Option<Task<Message>> {
-        match message {
-            Message::EscapePressed => {
-                println!("Escape key pressed");
+// impl Default for State {
+//     fn default() -> Self {
+//         Self {}
+//     }
+// }
 
-                Task::some(async move {
-                    tokio::time::sleep(Duration::from_millis(500)).await;
+// impl State {
+//     fn update(&mut self, message: Message) -> Option<Task<Message>> {
+//         match message {
+//             Message::EscapePressed => {
+//                 println!("Escape key pressed");
 
-                    Ok(Message::Stop)
-                })
-            }
-            Message::Stop => {
-                println!("Stopping the application...");
+//                 Task::some(async move {
+//                     tokio::time::sleep(Duration::from_millis(500)).await;
 
-                Task::stop()
-            }
-            Message::Error(report) => {
-                eprintln!("Error occurred: {}", report);
+//                     Ok(Message::Stop)
+//                 })
+//             }
+//             Message::Stop => {
+//                 println!("Stopping the application...");
 
-                Task::stop()
-            }
-        }
-    }
+//                 Task::stop()
+//             }
+//             Message::Error(report) => {
+//                 eprintln!("Error occurred: {}", report);
 
-    fn render(&self) -> Element<Message> {
-        Element::empty()
-    }
-}
+//                 Task::stop()
+//             }
+//         }
+//     }
+
+//     fn render(&self) -> Element<Message> {
+//         Element::empty()
+//     }
+// }
