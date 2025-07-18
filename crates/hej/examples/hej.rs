@@ -8,7 +8,7 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     Application::new(State::default, State::update, State::render)
-        .await?
+        .initial_task(Task::msg(Message::Nothing))
         .run::<EmptyBackend<Message>>(|e| Message::Error(Arc::new(e)))
         .await
 }
@@ -18,18 +18,18 @@ enum Message {
     Error(Arc<Report>),
 }
 
+#[derive(Default)]
 struct State {}
-
-impl Default for State {
-    fn default() -> Self {
-        State {}
-    }
-}
 
 impl State {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Nothing => Task::wait(Duration::from_millis(100), Message::Nothing),
+            Message::Nothing => Task::wait(Duration::from_millis(1000), Message::Nothing)
+                .then(Task::new(async move {
+                    println!("This is a test message!");
+                    Err(Report::msg("This is a test error!"))
+                }))
+                .then(Task::stop()),
             Message::Error(report) => {
                 tracing::error!("An error occurred: {}", report);
                 Task::none()

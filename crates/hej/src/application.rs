@@ -1,3 +1,5 @@
+//! The module defines the `Application` struct, which represents a UI application.
+
 use std::sync::Arc;
 
 use tokio::{
@@ -13,23 +15,40 @@ pub(crate) enum ApplicationDirective {
     ResetState,
 }
 
+pub(crate) type StateFn<State> = Box<dyn Fn() -> State + Send>;
+pub(crate) type UpdateFn<State, Message> = Box<dyn Fn(&mut State, Message) -> Task<Message> + Send>;
+pub(crate) type RenderFn<State, Message> = Box<dyn Fn(&State) -> Element<Message> + Send>;
+
+/// The `Application` struct represents a UI application with a state, update function, and render function.
 pub struct Application<State, Message> {
-    pub(crate) state: Box<dyn Fn() -> State + Send>,
-    pub(crate) update: Box<dyn Fn(&mut State, Message) -> Task<Message> + Send>,
-    pub(crate) render: Box<dyn Fn(&State) -> Element<Message> + Send>,
+    pub(crate) state: StateFn<State>,
+    pub(crate) update: UpdateFn<State, Message>,
+    pub(crate) render: RenderFn<State, Message>,
+
+    pub(crate) initial_task: Option<Task<Message>>,
 }
 
 impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, Message> {
-    pub async fn new(
+    /// Creates a new `Application` instance with the provided state, update function, and render function.
+    pub fn new(
         state: impl Fn() -> State + 'static + Send,
         update: impl Fn(&mut State, Message) -> Task<Message> + 'static + Send,
         render: impl Fn(&State) -> Element<Message> + 'static + Send,
-    ) -> Result<Self> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             state: Box::new(state),
             update: Box::new(update),
             render: Box::new(render),
-        })
+            initial_task: None,
+        }
+    }
+
+    /// Sets the initial task to be executed when the application starts.
+    pub fn initial_task(self, task: Task<Message>) -> Self {
+        Self {
+            initial_task: Some(task),
+            ..self
+        }
     }
 
     pub(crate) fn jobs<Backend: BackendTrait<Message>>(
@@ -39,7 +58,7 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
     ) -> (
         JoinHandle<Result<()>>,
         JoinHandle<Result<()>>,
-        JoinHandle<Result<()>>,
+        JoinHandle<()>,
     ) {
         let (msg_client, mut msg_server) = unbounded_channel::<Message>();
         let (directive_client, mut directive_server) = unbounded_channel::<ApplicationDirective>();
@@ -51,6 +70,13 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
 
             (pool, tasks)
         };
+
+        if let Some(task) = self.initial_task {
+            tracing::info!("Sending initial task to the task pool");
+            tasks.send(task).unwrap_or_else(|e| {
+                tracing::error!("Failed to send initial task: {}", e);
+            });
+        }
 
         let mut state = (self.state)();
         let backend_client = backend.client();
@@ -96,6 +122,7 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
         (server, backend, pool)
     }
 
+    /// Runs the application with the specified backend.
     pub async fn run<Backend: BackendTrait<Message> + 'static>(
         self,
         on_error: impl Fn(Report) -> Message + 'static + Send + Sync,
@@ -110,7 +137,7 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
             result = pool => {
                 tracing::info!("Task pool has stopped");
 
-                result?
+                result.map_err(Report::msg)
             }
             result = server => {
                 tracing::info!("Server task has stopped");

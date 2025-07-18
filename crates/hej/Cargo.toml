@@ -1,6 +1,6 @@
 [package]
 name = "hej"
-description = "ELM architecture widget library, built on top of tokio."
+description = "ELM architecture widget library, built on top of tokio and chii."
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true
