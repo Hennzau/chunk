@@ -19,3 +19,8 @@ chii.workspace = true
 eyre.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+
+raw-window-handle.workspace = true
+smithay-client-toolkit.workspace = true
+wayland-client.workspace = true
+wayland-backend.workspace = true

@@ -20,6 +20,34 @@ pub(crate) type UpdateFn<State, Message> = Box<dyn Fn(&mut State, Message) -> Ta
 pub(crate) type RenderFn<State, Message> = Box<dyn Fn(&State) -> Element<Message> + Send>;
 
 /// The `Application` struct represents a UI application with a state, update function, and render function.
+/// Example usage:
+///
+/// ```rust
+/// use std::{sync::Arc, time::Duration};
+///
+/// use hej::prelude::*;
+///
+/// let application =
+///     Application::new(State::default, State::update, State::render)
+///     .initial_task(Task::msg(Message::Nothing));
+///
+/// enum Message {
+///     Nothing,
+///     Error(Arc<Report>),
+/// }
+///
+/// #[derive(Default)]
+/// struct State {}
+///
+/// impl State {
+///     fn update(&mut self, _message: Message) -> Task<Message> {
+///         Task::stop()
+///     }
+///     fn render(&self) -> Element<Message> {
+///         Element::empty()
+///     }
+/// }
+/// ```
 pub struct Application<State, Message> {
     pub(crate) state: StateFn<State>,
     pub(crate) update: UpdateFn<State, Message>,
@@ -123,6 +151,38 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
     }
 
     /// Runs the application with the specified backend.
+    /// Example usage:
+    ///
+    /// ```rust
+    /// use std::{sync::Arc, time::Duration};
+    ///
+    /// use hej::prelude::*;
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<()> {
+    ///     Application::new(State::default, State::update, State::render)
+    ///         .initial_task(Task::msg(Message::Nothing))
+    ///         .run::<EmptyBackend<Message>>(|e| Message::Error(Arc::new(e)))
+    ///         .await
+    /// }
+    ///
+    /// enum Message {
+    ///     Nothing,
+    ///     Error(Arc<Report>),
+    /// }
+    ///
+    /// #[derive(Default)]
+    /// struct State {}
+    ///
+    /// impl State {
+    ///     fn update(&mut self, _message: Message) -> Task<Message> {
+    ///         Task::stop()
+    ///     }
+    ///     fn render(&self) -> Element<Message> {
+    ///         Element::empty()
+    ///     }
+    /// }
+    /// ```
     pub async fn run<Backend: BackendTrait<Message> + 'static>(
         self,
         on_error: impl Fn(Report) -> Message + 'static + Send + Sync,

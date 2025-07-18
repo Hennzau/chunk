@@ -21,6 +21,18 @@ pub(crate) enum TaskHandle<Message> {
 }
 
 /// Represents a task that can be executed asynchronously.
+///
+/// Example usage:
+/// ```rust
+/// use hej::prelude::{reexport::*, *};
+/// use std::time::Duration;
+///
+/// let task = Task::new(async {
+///    Ok("Hello, World!")
+/// });
+///
+/// let task = task.then(Task::wait(Duration::from_secs(1), "Done!"));
+/// ```
 pub struct Task<Message> {
     pub(crate) handle: TaskHandle<Message>,
     pub(crate) signal: Option<Sender<()>>,
@@ -28,6 +40,18 @@ pub struct Task<Message> {
 
 impl<Message: Sync + Send + 'static> Task<Message> {
     /// Creates a new task with a future that resolves to a message.
+    /// Example:
+    /// ```rust
+    /// use hej::prelude::{reexport::*, *};
+    ///
+    /// enum Message {
+    ///     Nothing
+    /// }
+    ///
+    /// let task = Task::new(async {
+    ///     Ok(Message::Nothing)
+    /// });
+    /// ```
     pub fn new(fut: impl Future<Output = Result<Message>> + Send + Sync + 'static) -> Self {
         Task {
             handle: TaskHandle::Simple(Box::pin(fut)),
@@ -36,6 +60,20 @@ impl<Message: Sync + Send + 'static> Task<Message> {
     }
 
     /// Batch multiple tasks together to be executed in parallel.
+    /// Example:
+    /// ```rust
+    /// use hej::prelude::{reexport::*, *};
+    ///
+    /// enum Message {
+    ///     Nothing
+    /// }
+    ///
+    /// let mut task = Task::none();
+    ///
+    /// for _ in 0..10 {
+    ///    task = task.batch(Task::msg(Message::Nothing));
+    /// }
+    /// ```
     pub fn batch(self, other: Task<Message>) -> Self {
         Task {
             handle: TaskHandle::Batch(vec![self, other]),
@@ -44,6 +82,17 @@ impl<Message: Sync + Send + 'static> Task<Message> {
     }
 
     /// Chains two tasks together, where the next task will only run after the first one completes.
+    /// Example usage:
+    /// ```rust
+    /// use hej::prelude::{reexport::*, *};
+    /// use std::time::Duration;
+    ///
+    /// let task = Task::new(async {
+    ///    Ok("Hello, World!")
+    /// });
+    ///
+    /// let task = task.then(Task::wait(Duration::from_secs(1), "Done!"));
+    /// ```
     pub fn then(self, next: Task<Message>) -> Self {
         Task {
             handle: TaskHandle::Then(Box::new(self), Box::new(next)),

@@ -15,6 +15,7 @@ async fn main() -> Result<()> {
 
 enum Message {
     Nothing,
+    Stop,
     Error(Arc<Report>),
 }
 
@@ -24,12 +25,12 @@ struct State {}
 impl State {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Nothing => Task::wait(Duration::from_millis(1000), Message::Nothing)
-                .then(Task::new(async move {
-                    println!("This is a test message!");
-                    Err(Report::msg("This is a test error!"))
-                }))
-                .then(Task::stop()),
+            Message::Stop => Task::stop(),
+            Message::Nothing => Task::new(async move {
+                println!("This is a test message!");
+                Err(Report::msg("This is a test error!"))
+            })
+            .then(Task::wait(Duration::from_millis(1000), Message::Stop)),
             Message::Error(report) => {
                 tracing::error!("An error occurred: {}", report);
                 Task::none()
