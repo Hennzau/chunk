@@ -1,6 +1,6 @@
 [package]
 name = "chii"
-description = "Graphics related primitives."
+description = "Common primitives for rendering libraries."
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true

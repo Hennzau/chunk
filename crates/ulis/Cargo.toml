@@ -1,6 +1,6 @@
 [package]
-name = "nux"
-description = "2d renderer for human interface design, built on top of wgpu."
+name = "ulis"
+description = "Common widgets for hej."
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true
@@ -13,4 +13,3 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-chii.workspace = true

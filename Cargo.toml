@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/chii", "crates/hej", "crates/kyo", "crates/nux"]
+members = [
+    "crates/chii",
+    "crates/hej",
+    "crates/ulis",
+    "crates/nux",
+    "crates/kyo",
+]
 resolver = "3"
 
 [workspace.package]
@@ -16,8 +22,10 @@ version = "0.1.0"
 [workspace.dependencies]
 chii = { version = "0.1.0", path = "crates/chii" }
 hej = { version = "0.1.0", path = "crates/hej" }
+ulis = { version = "0.1.0", path = "crates/ulis" }
 nux = { version = "0.1.0", path = "crates/nux" }
 kyo = { version = "0.1.0", path = "crates/kyo" }
+
 
 eyre = "0.6"
 

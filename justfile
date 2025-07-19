@@ -13,6 +13,9 @@ publish-chii:
 publish-hej:
     cargo publish --package hej
 
+publish-ulis:
+    cargo publish --package ulis
+
 publish-nux:
     cargo publish --package nux
 

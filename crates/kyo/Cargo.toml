@@ -1,6 +1,6 @@
 [package]
 name = "kyo"
-description = "2d GUI application framework for wayland, built on top of hej, nux and smithay-client-toolkit."
+description = "Wayland backend and widget for hej, built on top of wgpu and smithay-client-toolkit."
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true
