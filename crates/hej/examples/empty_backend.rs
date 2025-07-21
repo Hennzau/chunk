@@ -8,7 +8,7 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     Application::new(State::default, State::update, State::render)
-        .initial_task(Task::msg(Message::Nothing))
+        .task(Task::msg(Message::Nothing))
         .run::<EmptyBackend<Message>>(|e| Message::Error(Arc::new(e)))
         .await
 }

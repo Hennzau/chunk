@@ -1,61 +1,39 @@
-// use kyo::prelude::{reexport::*, *};
-
-// use std::{sync::Arc, time::Duration};
+use kyo::prelude::{reexport::*, *};
+use smithay_client_toolkit::shell::wlr_layer::Anchor;
 
 #[tokio::main]
-async fn main() {}
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
-// #[tokio::main]
-// async fn main() -> Result<()> {
-//     Application::new(State::default(), State::update, State::render)
-//         .await?
-//         .run(|report| Message::Error(Arc::new(report)))
-//         .await
-// }
+    Application::new(State::default, State::update, State::render)
+        .run::<WaylandBackend<Message>>(|e| {
+            tracing::error!("Error in application: {:?}", e);
 
-// #[derive(Debug, Clone)]
-// pub enum Message {
-//     EscapePressed,
+            Message::Stop
+        })
+        .await
+}
 
-//     Stop,
+enum Message {
+    Stop,
+}
 
-//     Error(Arc<Report>),
-// }
+#[derive(Default)]
+struct State {}
 
-// pub struct State {}
+impl State {
+    fn update(&mut self, message: Message) -> Task<Message> {
+        match message {
+            Message::Stop => Task::stop(),
+        }
+    }
 
-// impl Default for State {
-//     fn default() -> Self {
-//         Self {}
-//     }
-// }
-
-// impl State {
-//     fn update(&mut self, message: Message) -> Option<Task<Message>> {
-//         match message {
-//             Message::EscapePressed => {
-//                 println!("Escape key pressed");
-
-//                 Task::some(async move {
-//                     tokio::time::sleep(Duration::from_millis(500)).await;
-
-//                     Ok(Message::Stop)
-//                 })
-//             }
-//             Message::Stop => {
-//                 println!("Stopping the application...");
-
-//                 Task::stop()
-//             }
-//             Message::Error(report) => {
-//                 eprintln!("Error occurred: {}", report);
-
-//                 Task::stop()
-//             }
-//         }
-//     }
-
-//     fn render(&self) -> Element<Message> {
-//         Element::empty()
-//     }
-// }
+    fn render(&self) -> Element<Message> {
+        views()
+            .view(view().anchor(Anchor::BOTTOM).label("bar.bottom"))
+            .view(view().anchor(Anchor::TOP).label("bar.top"))
+            .element()
+    }
+}

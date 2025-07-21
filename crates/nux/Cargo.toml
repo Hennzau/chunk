@@ -14,3 +14,9 @@ version.workspace = true
 
 [dependencies]
 chii.workspace = true
+
+eyre.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+wgpu.workspace = true

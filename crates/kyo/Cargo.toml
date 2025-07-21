@@ -14,7 +14,6 @@ version.workspace = true
 
 [dependencies]
 hej.workspace = true
-chii.workspace = true
 
 eyre.workspace = true
 tokio.workspace = true
@@ -24,3 +23,6 @@ raw-window-handle.workspace = true
 smithay-client-toolkit.workspace = true
 wayland-client.workspace = true
 wayland-backend.workspace = true
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

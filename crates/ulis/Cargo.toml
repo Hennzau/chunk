@@ -13,3 +13,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+hej.workspace = true
+
+eyre.workspace = true
+tokio.workspace = true
+tracing.workspace = true

@@ -8,7 +8,7 @@ use crate::prelude::*;
 
 /// The BackendTrait defines the interface for a backend that can receives elements to render and
 /// manage.
-pub trait BackendTrait<Message>: Send + Sync {
+pub trait Backend<Message>: Send + Sync {
     /// Creates a new instance of the backend.
     fn new() -> impl Future<Output = Result<Self>> + Send + 'static
     where
@@ -32,7 +32,7 @@ pub struct EmptyBackend<Message> {
     pub(crate) server: UnboundedReceiver<Element<Message>>,
 }
 
-impl<Message: 'static> BackendTrait<Message> for EmptyBackend<Message> {
+impl<Message: 'static> Backend<Message> for EmptyBackend<Message> {
     async fn new() -> Result<Self> {
         let (client, server) = tokio::sync::mpsc::unbounded_channel::<Element<Message>>();
         Ok(Self { client, server })

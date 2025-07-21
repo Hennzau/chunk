@@ -72,16 +72,16 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
     }
 
     /// Sets the initial task to be executed when the application starts.
-    pub fn initial_task(self, task: Task<Message>) -> Self {
+    pub fn task(self, task: Task<Message>) -> Self {
         Self {
             initial_task: Some(task),
             ..self
         }
     }
 
-    pub(crate) fn jobs<Backend: BackendTrait<Message>>(
+    pub(crate) fn jobs<T: Backend<Message>>(
         self,
-        backend: Backend,
+        backend: T,
         on_error: impl Fn(Report) -> Message + 'static + Send + Sync,
     ) -> (
         JoinHandle<Result<()>>,
@@ -183,11 +183,11 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
     ///     }
     /// }
     /// ```
-    pub async fn run<Backend: BackendTrait<Message> + 'static>(
+    pub async fn run<T: Backend<Message> + 'static>(
         self,
         on_error: impl Fn(Report) -> Message + 'static + Send + Sync,
     ) -> Result<()> {
-        let backend = Backend::new().await?;
+        let backend = T::new().await?;
 
         let (server, backend, pool) = self.jobs(backend, on_error);
 

@@ -26,7 +26,6 @@ ulis = { version = "0.1.0", path = "crates/ulis" }
 nux = { version = "0.1.0", path = "crates/nux" }
 kyo = { version = "0.1.0", path = "crates/kyo" }
 
-
 eyre = "0.6"
 
 tokio = { version = "1", features = ["full"] }
@@ -39,3 +38,5 @@ raw-window-handle = "0.6.0"
 smithay-client-toolkit = { git = "https://github.com/Smithay/client-toolkit" }
 wayland-client = "0.31.1"
 wayland-backend = { version = "0.3.0", features = ["client_system"] }
+
+wgpu = "26"
