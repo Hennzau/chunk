@@ -1,5 +1,4 @@
 use kyo::prelude::{reexport::*, *};
-use smithay_client_toolkit::shell::wlr_layer::Anchor;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -8,6 +7,7 @@ async fn main() -> Result<()> {
         .init();
 
     Application::new(State::default, State::update, State::render)
+        .task(Task::msg(Message::Open))
         .run::<WaylandBackend<Message>>(|e| {
             tracing::error!("Error in application: {:?}", e);
 
@@ -18,6 +18,7 @@ async fn main() -> Result<()> {
 
 enum Message {
     Stop,
+    Open,
 }
 
 #[derive(Default)]
@@ -27,6 +28,13 @@ impl State {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::Stop => Task::stop(),
+            Message::Open => Task::submit(empty().label("bar.left").layout(Layout {
+                width: 24,
+                height: 1080,
+                reserve: Some(Reserve::Left),
+
+                ..Default::default()
+            })),
         }
     }
 

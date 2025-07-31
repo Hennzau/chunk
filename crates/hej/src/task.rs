@@ -147,9 +147,9 @@ impl<Message: Sync + Send + 'static> Task<Message> {
         }
     }
 
-    pub fn submit(element: Element<Message>) -> Self {
+    pub fn submit(element: impl IntoElement<Message>) -> Self {
         Task {
-            handle: TaskHandle::Special(SpecialTask::Submit(element)),
+            handle: TaskHandle::Special(SpecialTask::Submit(element.element())),
             signal: None,
         }
     }
