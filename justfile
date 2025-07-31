@@ -21,3 +21,6 @@ publish-nux:
 
 publish-kyo:
     cargo publish --package kyo
+
+run example:
+    cargo run --example {{example}}

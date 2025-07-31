@@ -1,9 +1,6 @@
 //! Element module for the GUI framework.
 
-use std::{any::Any, pin::Pin};
-
 use eyre::OptionExt;
-use tokio::sync::mpsc::UnboundedSender;
 
 use crate::prelude::*;
 
@@ -12,25 +9,29 @@ pub struct Element<Message> {
     pub(crate) widget: Box<dyn Widget<Message>>,
 }
 
-impl<Message: 'static> Element<Message> {
+impl<Message: 'static + Send + Sync> Element<Message> {
     /// Creates an empty element, suitable for use as a placeholder.
     pub fn empty() -> Self {
-        EmptyWidget {}.element()
+        empty().element()
+    }
+
+    pub fn layout(&self) -> Layout {
+        self.widget.layout()
+    }
+
+    pub fn label(&self) -> Option<String> {
+        self.widget.label()
     }
 
     /// This function is called when an event occurs on the widget.
     /// The widget can then send messages to the application based on the event.
-    pub async fn on_event(
-        &mut self,
-        event: &Event,
-        client: &UnboundedSender<Message>,
-    ) -> Result<()> {
-        self.widget.on_event(event, client).await
+    pub fn on_event(&mut self, event: Event, client: Submitter<Message>) -> Result<()> {
+        self.widget.on_event(event, client)
     }
 
     /// This function is called to render the widget using the provided renderer.
-    pub fn render(&self, renderer: &mut Renderer) -> Result<()> {
-        self.widget.render(renderer)
+    pub fn draw(&self, canvas: Canvas, renderer: &mut Renderer) -> Result<()> {
+        self.widget.draw(canvas, renderer)
     }
 
     /// This function returns a reference to the widget as a trait object.
@@ -50,8 +51,26 @@ impl<Message: 'static> Element<Message> {
     }
 
     /// This function consumes the element and returns the underlying widget as a trait object.
-    pub fn downcast<T: Widget<Message>>(self) -> Result<Box<T>, Box<dyn Any>> {
-        self.widget.into_any().downcast::<T>()
+    pub fn downcast<T: Widget<Message>>(self) -> Result<Box<T>, Self> {
+        if self.widget.as_any().downcast_ref::<T>().is_some() {
+            return Ok(self
+                .widget
+                .into_any()
+                .downcast::<T>()
+                .expect("Downcasting should have worked..."));
+        }
+
+        Err(self)
+    }
+
+    /// Maps this Element<Message> to another Element<NewMessage>
+    pub fn map<NewMessage: 'static + Send + Sync>(
+        self,
+        map: Map<Message, NewMessage>,
+    ) -> Element<NewMessage> {
+        Element {
+            widget: Box::new(MapWidget::new(self.widget, map)),
+        }
     }
 }
 
@@ -70,43 +89,4 @@ where
             widget: Box::new(self),
         }
     }
-}
-
-/// A widget that does not render anything and does not handle any events.
-pub struct EmptyWidget {}
-
-impl<Message> Widget<Message> for EmptyWidget {
-    /// Handles no events and does nothing.
-    fn on_event<'a>(
-        &'a mut self,
-        _event: &'a Event,
-        _client: &'a UnboundedSender<Message>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>>
-    where
-        Self: Sync + 'a,
-    {
-        Box::pin(async move { Ok(()) })
-    }
-
-    /// Renders nothing.
-    fn render(&self, _renderer: &mut Renderer) -> Result<()> {
-        Ok(())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn into_any(self: Box<Self>) -> Box<dyn Any> {
-        self
-    }
-}
-
-/// Makes an 'EmptyWidget'.
-pub fn empty() -> EmptyWidget {
-    EmptyWidget {}
 }

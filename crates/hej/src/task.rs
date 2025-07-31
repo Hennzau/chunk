@@ -6,18 +6,21 @@ use tokio::sync::oneshot::Sender;
 
 use crate::prelude::*;
 
-#[derive(Debug)]
-pub(crate) enum SpecialTask {
+pub(crate) enum SpecialTask<Message> {
     None,
+
     Stop,
     ResetState,
+
+    Submit(Element<Message>),
+    Close(String),
 }
 
 pub(crate) enum TaskHandle<Message> {
     Simple(Pin<Box<dyn Future<Output = Result<Message>> + Send + Sync + 'static>>),
     Batch(Vec<Task<Message>>),
     Then(Box<Task<Message>>, Box<Task<Message>>),
-    Special(SpecialTask),
+    Special(SpecialTask<Message>),
 }
 
 /// Represents a task that can be executed asynchronously.
@@ -140,6 +143,55 @@ impl<Message: Sync + Send + 'static> Task<Message> {
     pub fn msg(message: Message) -> Self {
         Task {
             handle: TaskHandle::Simple(Box::pin(async move { Ok(message) })),
+            signal: None,
+        }
+    }
+
+    pub fn submit(element: Element<Message>) -> Self {
+        Task {
+            handle: TaskHandle::Special(SpecialTask::Submit(element)),
+            signal: None,
+        }
+    }
+
+    pub fn close(label: impl Into<String>) -> Self {
+        Task {
+            handle: TaskHandle::Special(SpecialTask::Close(label.into())),
+            signal: None,
+        }
+    }
+
+    /// Maps this Task<Message> to another Task<NewMessage>
+    pub fn map<NewMessage: 'static + Send + Sync>(
+        self,
+        map: Map<Message, NewMessage>,
+    ) -> Task<NewMessage> {
+        Task {
+            handle: match self.handle {
+                TaskHandle::Simple(fut) => TaskHandle::Simple(Box::pin(async move {
+                    let message = fut.await?;
+                    Ok(map.map(message))
+                })),
+                TaskHandle::Batch(tasks) => TaskHandle::Batch(
+                    tasks
+                        .into_iter()
+                        .map(|task| task.map(map.clone()))
+                        .collect(),
+                ),
+                TaskHandle::Then(first, second) => TaskHandle::Then(
+                    Box::new(first.map(map.clone())),
+                    Box::new(second.map(map.clone())),
+                ),
+                TaskHandle::Special(special) => match special {
+                    SpecialTask::None => TaskHandle::Special(SpecialTask::None),
+                    SpecialTask::ResetState => TaskHandle::Special(SpecialTask::ResetState),
+                    SpecialTask::Stop => TaskHandle::Special(SpecialTask::Stop),
+                    SpecialTask::Submit(element) => {
+                        TaskHandle::Special(SpecialTask::Submit(element.map(map.clone())))
+                    }
+                    SpecialTask::Close(label) => TaskHandle::Special(SpecialTask::Close(label)),
+                },
+            },
             signal: None,
         }
     }

@@ -4,40 +4,35 @@
 
 use std::sync::Arc;
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-
 use crate::prelude::*;
 
 pub(crate) struct TaskPool<Message> {
-    task_sender: UnboundedSender<Task<Message>>,
-    task_receiver: UnboundedReceiver<Task<Message>>,
+    submitter: Submitter<Task<Message>>,
+    server: Server<Task<Message>>,
 }
 
 impl<Message: Sync + Send + 'static> TaskPool<Message> {
     pub(crate) fn new() -> Self {
-        let (tx, rx) = unbounded_channel();
+        let (submitter, server) = channel();
 
-        TaskPool {
-            task_sender: tx,
-            task_receiver: rx,
-        }
+        TaskPool { submitter, server }
     }
 
-    pub(crate) fn sender(&self) -> UnboundedSender<Task<Message>> {
-        self.task_sender.clone()
+    pub(crate) fn submitter(&self) -> Submitter<Task<Message>> {
+        self.submitter.clone()
     }
 
     pub(crate) async fn run(
         mut self,
         on_error: impl Fn(Report) -> Message + 'static + Send + Sync,
-        msg_client: UnboundedSender<Message>,
-        directive_client: UnboundedSender<ApplicationDirective>,
+        msg_submitter: Submitter<Message>,
+        directive_submitter: Submitter<ApplicationDirective<Message>>,
     ) {
         tracing::info!("TaskPool started");
 
         let on_error = Arc::new(on_error);
 
-        while let Some(task) = self.task_receiver.recv().await {
+        while let Ok(task) = self.server.recv().await {
             let signal = task.signal;
 
             match task.handle {
@@ -45,10 +40,14 @@ impl<Message: Sync + Send + 'static> TaskPool<Message> {
                     match directive {
                         SpecialTask::None => {}
                         directive => {
-                            directive_client
-                                .send(match directive {
+                            directive_submitter
+                                .submit(match directive {
                                     SpecialTask::Stop => ApplicationDirective::Stop,
                                     SpecialTask::ResetState => ApplicationDirective::ResetState,
+                                    SpecialTask::Submit(element) => {
+                                        ApplicationDirective::Submit(element)
+                                    }
+                                    SpecialTask::Close(label) => ApplicationDirective::Close(label),
                                     SpecialTask::None => unreachable!(),
                                 })
                                 .unwrap_or_else(|e| {
@@ -60,21 +59,21 @@ impl<Message: Sync + Send + 'static> TaskPool<Message> {
                     signal.map(|s| s.send(()));
                 }
                 TaskHandle::Simple(fut) => {
-                    let result_sender = msg_client.clone();
+                    let result_sender = msg_submitter.clone();
                     let on_error = on_error.clone();
                     tokio::spawn(async move {
                         let result = fut.await;
                         signal.map(|s| s.send(()));
 
                         result_sender
-                            .send(result.unwrap_or_else(|e| on_error(e)))
+                            .submit(result.unwrap_or_else(|e| on_error(e)))
                             .unwrap_or_else(|e| {
                                 tracing::error!("Failed to send message: {}", e);
                             });
                     });
                 }
                 TaskHandle::Batch(tasks) => {
-                    let tx = self.task_sender.clone();
+                    let tx = self.submitter.clone();
                     tokio::spawn(async move {
                         let mut releases = Vec::new();
 
@@ -83,7 +82,7 @@ impl<Message: Sync + Send + 'static> TaskPool<Message> {
 
                             t.signal = Some(tsignal);
 
-                            tx.send(t).unwrap_or_else(|e| {
+                            tx.submit(t).unwrap_or_else(|e| {
                                 tracing::error!("Failed to send task: {}", e);
                             });
 
@@ -100,12 +99,12 @@ impl<Message: Sync + Send + 'static> TaskPool<Message> {
                     });
                 }
                 TaskHandle::Then(mut first, mut second) => {
-                    let tx = self.task_sender.clone();
+                    let tx = self.submitter.clone();
                     tokio::spawn(async move {
                         let (fsignal, release) = tokio::sync::oneshot::channel();
                         first.signal = Some(fsignal);
 
-                        tx.send(*first).unwrap_or_else(|e| {
+                        tx.submit(*first).unwrap_or_else(|e| {
                             tracing::error!("Failed to send first task: {}", e);
                         });
 
@@ -115,7 +114,7 @@ impl<Message: Sync + Send + 'static> TaskPool<Message> {
 
                         let (ssignal, release) = tokio::sync::oneshot::channel();
                         second.signal = Some(ssignal);
-                        tx.send(*second).unwrap_or_else(|e| {
+                        tx.submit(*second).unwrap_or_else(|e| {
                             tracing::error!("Failed to send second task: {}", e);
                         });
 

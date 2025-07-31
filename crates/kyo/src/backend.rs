@@ -3,6 +3,7 @@ use std::{pin::Pin, time::Duration};
 use crate::prelude::*;
 
 pub(crate) mod wayland;
+use eyre::OptionExt;
 pub(crate) use wayland::*;
 
 use smithay_client_toolkit::{
@@ -10,22 +11,25 @@ use smithay_client_toolkit::{
     shell::{
         WaylandSurface,
         wlr_layer::{Anchor, KeyboardInteractivity, Layer, LayerShell, LayerSurface},
-        xdg::{
-            XdgShell,
-            window::{Window, WindowDecorations},
-        },
+        xdg::XdgShell,
     },
 };
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use wayland_client::{Connection, EventQueue, globals::registry_queue_init};
+
+use wayland_client::{
+    Connection, EventQueue,
+    globals::{GlobalList, registry_queue_init},
+};
 
 pub struct WaylandBackend<Message> {
-    pub(crate) client: UnboundedSender<Element<Message>>,
-    pub(crate) server: UnboundedReceiver<Element<Message>>,
+    pub(crate) submitter: Submitter<Element<Message>>,
+    pub(crate) server: Server<Element<Message>>,
 
-    pub(crate) state: State<Message>,
+    pub(crate) closer: Submitter<String>,
+    pub(crate) closer_server: Server<String>,
 
+    pub(crate) globals: GlobalList,
     pub(crate) event_queue: EventQueue<State<Message>>,
+
     pub(crate) compositor_state: CompositorState,
     pub(crate) xdg_shell: XdgShell,
     pub(crate) layer_shell: LayerShell,
@@ -33,7 +37,8 @@ pub struct WaylandBackend<Message> {
 
 impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message> {
     async fn new() -> Result<Self> {
-        let (client, server) = tokio::sync::mpsc::unbounded_channel::<Element<Message>>();
+        let (submitter, server) = channel();
+        let (closer, closer_server) = channel();
 
         let connection = Connection::connect_to_env()?;
 
@@ -44,29 +49,36 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
         let xdg_shell = XdgShell::bind(&globals, &qh)?;
         let layer_shell = LayerShell::bind(&globals, &qh)?;
 
-        let state = State::new(client.clone(), &globals, &qh);
-
         Ok(Self {
+            globals,
             event_queue,
             compositor_state,
             xdg_shell,
             layer_shell,
-            state,
-            client,
+
+            submitter,
             server,
+            closer,
+            closer_server,
         })
     }
 
-    fn client(&self) -> UnboundedSender<Element<Message>> {
-        self.client.clone()
+    fn submitter(&self) -> Submitter<Element<Message>> {
+        self.submitter.clone()
+    }
+
+    fn closer(&self) -> Submitter<String> {
+        self.closer.clone()
     }
 
     fn run(
         mut self,
-        _client: UnboundedSender<Message>,
+        msg_submitter: Submitter<Message>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async move {
             tracing::info!("Wayland backend started");
+
+            let mut state = State::new(msg_submitter, &self.globals, &self.event_queue.handle());
 
             loop {
                 tokio::select! {
@@ -79,73 +91,73 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
                             }
                         }
 
-                        self.event_queue.dispatch_pending(&mut self.state).unwrap();
+                        self.event_queue.dispatch_pending(&mut state).unwrap();
                     }
-                    Some(element) = self.server.recv() => {
-                        let mut lut = self.state.lut.clone();
+                    Ok(element) = self.server.recv() => {
+                        let mut lut = state.lut.clone();
                         let mut new_labels = Vec::new();
 
-                        match element.downcast::<View<Message>>() {
-                            Ok(view) => {
-                                tracing::debug!("Received view");
+                        match element.downcast::<ContainerWidget<Message>>() {
+                            Ok(container) => {
+                                tracing::debug!("Received a container");
 
-                                if !lut.contains_key(&view.label) {
-                                    tracing::info!("New view received: {}", view.label);
+                                for element in container.elements() {
+                                    if element.label().is_none() {
+                                        continue;
+                                    }
 
-                                    let label = view.label.clone();
-                                    let wayland_view = WaylandView::new(self.create_wayland_surface(&view), *view);
+                                    let label = element.label().clone().unwrap(); // safe
 
-                                    new_labels.push(label.clone());
+                                    if !lut.contains_key(&label) {
+                                        tracing::info!("New element received: {}", label);
 
-                                    lut.insert(label.clone(), wayland_view.id.clone());
+                                        let widget =
+                                            WaylandWidget::new(self.create_wayland_surface(&element)?, element);
 
-                                    self.state
-                                        .lut
-                                        .insert(label.clone(), wayland_view.id.clone());
+                                        new_labels.push(label.clone());
 
-                                    self.state
-                                        .views
-                                        .insert(wayland_view.id.clone(), wayland_view);
-                                } else {
-                                    tracing::debug!("View already exists: {}", view.label);
+                                        lut.insert(label.clone(), widget.id.clone());
+
+                                        state
+                                            .lut
+                                            .insert(label.clone(), widget.id.clone());
+
+                                        state
+                                            .views
+                                            .insert(widget.id.clone(), widget);
+                                    } else {
+                                        tracing::debug!("View already exists: {}", label);
+                                    }
                                 }
                             }
                             Err(element) => {
-                                tracing::debug!("Failed to downcast element to view");
+                                tracing::debug!("Received a single element");
 
-                                match element.downcast::<Views<Message>>() {
-                                    Ok(views) => {
-                                        tracing::debug!("Received views");
-                                        for view in views.views {
-                                            if !lut.contains_key(&view.label) {
-                                                tracing::info!("New view received: {}", view.label);
+                                if element.label().is_none() {
+                                    continue;
+                                }
 
-                                                let label = view.label.clone();
-                                                let wayland_view =
-                                                    WaylandView::new(self.create_wayland_surface(&view), view);
+                                let label = element.label().clone().unwrap(); // safe
 
-                                                new_labels.push(label.clone());
+                                if !lut.contains_key(&label) {
+                                    tracing::info!("New element received: {}", label);
 
-                                                lut.insert(label.clone(), wayland_view.id.clone());
+                                    let widget =
+                                        WaylandWidget::new(self.create_wayland_surface(&element)?, element);
 
-                                                self.state
-                                                    .lut
-                                                    .insert(label.clone(), wayland_view.id.clone());
+                                    new_labels.push(label.clone());
 
-                                                self.state
-                                                    .views
-                                                    .insert(wayland_view.id.clone(), wayland_view);
-                                            } else {
-                                                tracing::debug!("View already exists: {}", view.label);
-                                            }
-                                        }
-                                    }
-                                    Err(element) => {
-                                        tracing::debug!(
-                                            "Failed to downcast element to views: {:?}",
-                                            element
-                                        );
-                                    }
+                                    lut.insert(label.clone(), widget.id.clone());
+
+                                    state
+                                        .lut
+                                        .insert(label.clone(), widget.id.clone());
+
+                                    state
+                                        .views
+                                        .insert(widget.id.clone(), widget);
+                                } else {
+                                    tracing::debug!("View already exists: {}", label);
                                 }
                             }
                         }
@@ -154,14 +166,21 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
                             if !new_labels.contains(&label) {
                                 tracing::debug!("Removing view: {}", label);
 
-                                if let Some(view) = self.state.views.remove(&id) {
+                                if let Some(view) = state.views.remove(&id) {
                                     view.destroy();
                                 }
 
-                                self.state.lut.remove(&label);
+                                state.lut.remove(&label);
                             }
                         }
 
+                    },
+                    Ok(label) = self.closer_server.recv() => {
+                        if let Some(id) = state.lut.remove(&label) {
+                            if let Some(widget) = state.views.remove(&id) {
+                                widget.destroy();
+                            }
+                        }
                     }
                 }
             }
@@ -177,7 +196,7 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
         anchor: Anchor,
         keyboard_interactivity: KeyboardInteractivity,
         size: (u32, u32),
-        exclusive_zone: i32,
+        exclusive_zone: u32,
         margin: (i32, i32, i32, i32),
     ) -> LayerSurface {
         let wl_surface = self
@@ -195,7 +214,7 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
         layer.set_anchor(anchor);
         layer.set_keyboard_interactivity(keyboard_interactivity);
         layer.set_size(size.0, size.1);
-        layer.set_exclusive_zone(exclusive_zone);
+        layer.set_exclusive_zone(exclusive_zone as i32);
         layer.set_margin(margin.0, margin.1, margin.2, margin.3);
 
         layer.commit();
@@ -203,54 +222,36 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
         layer
     }
 
-    pub(crate) fn create_window(
+    pub(crate) fn create_wayland_surface(
         &self,
-        decorations: WindowDecorations,
-        label: String,
-        min_size: Option<(u32, u32)>,
-        max_size: Option<(u32, u32)>,
-    ) -> Window {
-        let wl_surface = self
-            .compositor_state
-            .create_surface(&self.event_queue.handle());
+        element: &Element<Message>,
+    ) -> Result<SurfaceHandle> {
+        let (anchor, exclusive, margin) = match element.layout().reserve {
+            Some(reserve) => match reserve {
+                Reserve::Top => (Anchor::TOP, element.layout().height, (0, 0, 0, 0)),
+                Reserve::Bottom => (Anchor::BOTTOM, element.layout().height, (0, 0, 0, 0)),
+                Reserve::Left => (Anchor::LEFT, element.layout().width, (0, 0, 0, 0)),
+                Reserve::Right => (Anchor::RIGHT, element.layout().width, (0, 0, 0, 0)),
+            },
+            None => (
+                Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
+                0,
+                (0, 0, 0, 0),
+            ),
+        };
 
-        let window =
-            self.xdg_shell
-                .create_window(wl_surface, decorations, &self.event_queue.handle());
+        let layer = self.create_layer(
+            Layer::Top,
+            element
+                .label()
+                .ok_or_eyre("Element must have a label in order to build a wayland layer")?,
+            anchor,
+            KeyboardInteractivity::OnDemand,
+            (element.layout().width, element.layout().height),
+            exclusive,
+            margin,
+        );
 
-        window.set_title(&label);
-        window.set_app_id(&label);
-        window.set_min_size(min_size);
-        window.set_max_size(max_size);
-
-        window.commit();
-
-        window
-    }
-
-    pub(crate) fn create_wayland_surface(&self, view: &View<Message>) -> SurfaceHandle {
-        match view.window {
-            true => {
-                let window = self.create_window(
-                    view.decorations,
-                    view.label.clone(),
-                    view.min_size,
-                    view.max_size,
-                );
-                SurfaceHandle::Window(window)
-            }
-            false => {
-                let layer = self.create_layer(
-                    view.layer,
-                    view.label.clone(),
-                    view.anchor,
-                    view.keyboard_interactivity,
-                    view.size,
-                    view.exclusive_zone,
-                    view.margin,
-                );
-                SurfaceHandle::Layer(layer)
-            }
-        }
+        Ok(SurfaceHandle::Layer(layer))
     }
 }

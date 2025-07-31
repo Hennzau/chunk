@@ -8,7 +8,6 @@ use smithay_client_toolkit::{
     seat::SeatState,
     shell::{WaylandSurface, wlr_layer::LayerSurface, xdg::window::Window},
 };
-use tokio::sync::mpsc::UnboundedSender;
 use wayland_backend::client::ObjectId;
 use wayland_client::{
     Proxy, QueueHandle,
@@ -40,15 +39,15 @@ impl SurfaceHandle {
     }
 }
 
-pub(crate) struct WaylandView<Message> {
+pub(crate) struct WaylandWidget<Message> {
     pub(crate) id: ObjectId,
     pub(crate) surface: SurfaceHandle,
 
-    pub(crate) widget: View<Message>,
+    pub(crate) widget: Element<Message>,
 }
 
-impl<Message> WaylandView<Message> {
-    pub(crate) fn new(surface: SurfaceHandle, widget: View<Message>) -> Self {
+impl<Message> WaylandWidget<Message> {
+    pub(crate) fn new(surface: SurfaceHandle, widget: Element<Message>) -> Self {
         Self {
             id: surface.id(),
             surface,
@@ -65,9 +64,9 @@ impl<Message> WaylandView<Message> {
 }
 
 pub(crate) struct State<Message> {
-    pub(crate) client: UnboundedSender<Element<Message>>,
+    pub(crate) submitter: Submitter<Message>,
 
-    pub(crate) views: HashMap<ObjectId, WaylandView<Message>>,
+    pub(crate) views: HashMap<ObjectId, WaylandWidget<Message>>,
     pub(crate) lut: HashMap<String, ObjectId>,
 
     pub(crate) registry_state: RegistryState,
@@ -80,7 +79,7 @@ pub(crate) struct State<Message> {
 
 impl<Message: 'static + Send + Sync> State<Message> {
     pub(crate) fn new(
-        client: UnboundedSender<Element<Message>>,
+        submitter: Submitter<Message>,
         globals: &GlobalList,
         qh: &QueueHandle<Self>,
     ) -> Self {
@@ -92,9 +91,17 @@ impl<Message: 'static + Send + Sync> State<Message> {
             keyboard: None,
             pointer: None,
 
-            client,
+            submitter,
             views: HashMap::new(),
             lut: HashMap::new(),
+        }
+    }
+
+    pub(crate) fn on_event(&mut self, id: &ObjectId, event: Event) {
+        if let Some(view) = self.views.get_mut(id) {
+            if let Err(e) = view.widget.on_event(event, self.submitter.clone()) {
+                tracing::error!("Error {}", e);
+            }
         }
     }
 }

@@ -2,6 +2,7 @@
 //! a widget.
 
 /// The `Event` enum represents different types of events that can occur for a widget.
+#[derive(Debug, Clone)]
 pub enum Event {
     /// Configuration event that provides the width and height for the widget in case
     /// the widget needs to be resized or initialized with specific dimensions.

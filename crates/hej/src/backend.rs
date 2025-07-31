@@ -2,8 +2,6 @@
 
 use std::pin::Pin;
 
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-
 use crate::prelude::*;
 
 /// The BackendTrait defines the interface for a backend that can receives elements to render and
@@ -15,41 +13,54 @@ pub trait Backend<Message>: Send + Sync {
         Self: Sized;
 
     /// Returns a clone of the client sender that can be used to send elements to the backend externally.
-    fn client(&self) -> UnboundedSender<Element<Message>>;
+    fn submitter(&self) -> Submitter<Element<Message>>;
+
+    fn closer(&self) -> Submitter<String>;
 
     /// Runs the backend, processing elements and handling messages.
-    fn run(
-        self,
-        client: UnboundedSender<Message>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
+    fn run(self, client: Submitter<Message>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
     where
         Self: Send;
 }
 
 /// An empty backend implementation that does not perform any operations.
 pub struct EmptyBackend<Message> {
-    pub(crate) client: UnboundedSender<Element<Message>>,
-    pub(crate) server: UnboundedReceiver<Element<Message>>,
+    pub(crate) submitter: Submitter<Element<Message>>,
+    pub(crate) server: Server<Element<Message>>,
+
+    pub(crate) closer: Submitter<String>,
+    pub(crate) _closer_server: Server<String>,
 }
 
 impl<Message: 'static> Backend<Message> for EmptyBackend<Message> {
     async fn new() -> Result<Self> {
-        let (client, server) = tokio::sync::mpsc::unbounded_channel::<Element<Message>>();
-        Ok(Self { client, server })
+        let (submitter, server) = channel();
+        let (closer, _closer_server) = channel();
+
+        Ok(Self {
+            submitter,
+            server,
+            closer,
+            _closer_server,
+        })
     }
 
-    fn client(&self) -> UnboundedSender<Element<Message>> {
-        self.client.clone()
+    fn closer(&self) -> Submitter<String> {
+        self.closer.clone()
+    }
+
+    fn submitter(&self) -> Submitter<Element<Message>> {
+        self.submitter.clone()
     }
 
     fn run(
         mut self,
-        _client: UnboundedSender<Message>,
+        _client: Submitter<Message>,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async move {
             tracing::info!("Backend started");
 
-            while let Some(_element) = self.server.recv().await {
+            while let Ok(_element) = self.server.recv().await {
                 tracing::debug!("Received element");
             }
             Ok(())

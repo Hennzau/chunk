@@ -1,25 +1,23 @@
 //! The module defines the `Application` struct, which represents a UI application.
 
-use std::sync::Arc;
-
-use tokio::{
-    sync::mpsc::unbounded_channel,
-    task::{self, JoinHandle},
-};
+use tokio::task::{self, JoinHandle};
 
 use crate::prelude::*;
 
-pub(crate) enum ApplicationDirective {
+pub(crate) enum ApplicationDirective<Message> {
     Stop,
 
     ResetState,
+
+    Submit(Element<Message>),
+    Close(String),
 }
 
 pub(crate) type StateFn<State> = Box<dyn Fn() -> State + Send>;
 pub(crate) type UpdateFn<State, Message> = Box<dyn Fn(&mut State, Message) -> Task<Message> + Send>;
-pub(crate) type RenderFn<State, Message> = Box<dyn Fn(&State) -> Element<Message> + Send>;
+pub(crate) type ViewFn<State, Message> = Box<dyn Fn(&State) -> Element<Message> + Send>;
 
-/// The `Application` struct represents a UI application with a state, update function, and render function.
+/// The `Application` struct represents a UI application with a state, update function, and view function.
 /// Example usage:
 ///
 /// ```rust
@@ -28,7 +26,7 @@ pub(crate) type RenderFn<State, Message> = Box<dyn Fn(&State) -> Element<Message
 /// use hej::prelude::*;
 ///
 /// let application =
-///     Application::new(State::default, State::update, State::render)
+///     Application::new(State::default, State::update, State::view)
 ///     .initial_task(Task::msg(Message::Nothing));
 ///
 /// enum Message {
@@ -43,7 +41,7 @@ pub(crate) type RenderFn<State, Message> = Box<dyn Fn(&State) -> Element<Message
 ///     fn update(&mut self, _message: Message) -> Task<Message> {
 ///         Task::stop()
 ///     }
-///     fn render(&self) -> Element<Message> {
+///     fn view(&self) -> Element<Message> {
 ///         Element::empty()
 ///     }
 /// }
@@ -51,22 +49,22 @@ pub(crate) type RenderFn<State, Message> = Box<dyn Fn(&State) -> Element<Message
 pub struct Application<State, Message> {
     pub(crate) state: StateFn<State>,
     pub(crate) update: UpdateFn<State, Message>,
-    pub(crate) render: RenderFn<State, Message>,
+    pub(crate) view: ViewFn<State, Message>,
 
     pub(crate) initial_task: Option<Task<Message>>,
 }
 
 impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, Message> {
-    /// Creates a new `Application` instance with the provided state, update function, and render function.
+    /// Creates a new `Application` instance with the provided state, update function, and view function.
     pub fn new(
         state: impl Fn() -> State + 'static + Send,
         update: impl Fn(&mut State, Message) -> Task<Message> + 'static + Send,
-        render: impl Fn(&State) -> Element<Message> + 'static + Send,
+        view: impl Fn(&State) -> Element<Message> + 'static + Send,
     ) -> Self {
         Self {
             state: Box::new(state),
             update: Box::new(update),
-            render: Box::new(render),
+            view: Box::new(view),
             initial_task: None,
         }
     }
@@ -88,54 +86,67 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
         JoinHandle<Result<()>>,
         JoinHandle<()>,
     ) {
-        let (msg_client, mut msg_server) = unbounded_channel::<Message>();
-        let (directive_client, mut directive_server) = unbounded_channel::<ApplicationDirective>();
+        let (msg_submitter, mut msg_server) = channel::<Message>();
+        let (directive_submitter, mut directive_server) =
+            channel::<ApplicationDirective<Message>>();
 
         let (pool, tasks) = {
             let pool = TaskPool::<Message>::new();
-            let tasks = Arc::new(pool.sender());
-            let pool = task::spawn(pool.run(on_error, msg_client.clone(), directive_client));
+            let tasks = pool.submitter();
+            let pool = task::spawn(pool.run(on_error, msg_submitter.clone(), directive_submitter));
 
             (pool, tasks)
         };
 
         if let Some(task) = self.initial_task {
             tracing::info!("Sending initial task to the task pool");
-            tasks.send(task).unwrap_or_else(|e| {
+            tasks.submit(task).unwrap_or_else(|e| {
                 tracing::error!("Failed to send initial task: {}", e);
             });
         }
 
         let mut state = (self.state)();
-        let backend_client = backend.client();
+
+        let backend_submitter = backend.submitter();
+        let backend_closer = backend.closer();
 
         let server = tokio::spawn(async move {
             tracing::info!("Server started");
 
-            let element = (self.render)(&state);
-            backend_client.send(element).unwrap_or_else(|e| {
+            let element = (self.view)(&state);
+            backend_submitter.submit(element).unwrap_or_else(|e| {
                 tracing::error!("Failed to submit element: {}", e);
             });
 
             loop {
                 tokio::select! {
-                    Some(message) = msg_server.recv() => {
+                    Ok(message) = msg_server.recv() => {
                         let task = (self.update)(&mut state, message);
-                        tasks.send(task).unwrap_or_else(|e| {
+                        tasks.submit(task).unwrap_or_else(|e| {
                             tracing::error!("Failed to send task: {}", e);
                         });
 
-                        let element = (self.render)(&state);
-                        backend_client.send(element).unwrap_or_else(|e| {
+                        let element = (self.view)(&state);
+                        backend_submitter.submit(element).unwrap_or_else(|e| {
                             tracing::error!("Failed to submit element: {}", e);
                         });
                     }
-                    Some(directive) = directive_server.recv() => {
+                    Ok(directive) = directive_server.recv() => {
                         match directive {
                             ApplicationDirective::Stop => break,
                             ApplicationDirective::ResetState => {
                                 state = (self.state)();
                                 tracing::info!("State has been reset");
+                            },
+                            ApplicationDirective::Submit(element) => {
+                                backend_submitter.submit(element).unwrap_or_else(|e| {
+                                    tracing::error!("Failed to submit element: {}", e);
+                                });
+                            },
+                            ApplicationDirective::Close(label) => {
+                                backend_closer.submit(label).unwrap_or_else(|e| {
+                                    tracing::error!("Failed to submit a close request for this label: {}", e);
+                                });
                             }
                         }
                     }
@@ -145,7 +156,7 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
             Ok(())
         });
 
-        let backend = tokio::spawn(backend.run(msg_client));
+        let backend = tokio::spawn(backend.run(msg_submitter));
 
         (server, backend, pool)
     }
@@ -160,7 +171,7 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
     ///
     /// #[tokio::main]
     /// async fn main() -> Result<()> {
-    ///     Application::new(State::default, State::update, State::render)
+    ///     Application::new(State::default, State::update, State::view)
     ///         .initial_task(Task::msg(Message::Nothing))
     ///         .run::<EmptyBackend<Message>>(|e| Message::Error(Arc::new(e)))
     ///         .await
@@ -178,7 +189,7 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
     ///     fn update(&mut self, _message: Message) -> Task<Message> {
     ///         Task::stop()
     ///     }
-    ///     fn render(&self) -> Element<Message> {
+    ///     fn view(&self) -> Element<Message> {
     ///         Element::empty()
     ///     }
     /// }

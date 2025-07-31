@@ -31,9 +31,21 @@ impl State {
     }
 
     fn render(&self) -> Element<Message> {
-        views()
-            .view(view().anchor(Anchor::BOTTOM).label("bar.bottom"))
-            .view(view().anchor(Anchor::TOP).label("bar.top"))
+        container()
+            .with(empty().label("bar.bottom").layout(Layout {
+                width: 1920,
+                height: 24,
+                reserve: Some(Reserve::Top),
+
+                ..Default::default()
+            }))
+            .with(empty().label("bar.top").layout(Layout {
+                width: 1920,
+                height: 24,
+                reserve: Some(Reserve::Bottom),
+
+                ..Default::default()
+            }))
             .element()
     }
 }
