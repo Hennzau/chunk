@@ -99,7 +99,6 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
         };
 
         if let Some(task) = self.initial_task {
-            tracing::info!("Sending initial task to the task pool");
             tasks.submit(task).unwrap_or_else(|e| {
                 tracing::error!("Failed to send initial task: {}", e);
             });
@@ -114,6 +113,8 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
             tracing::info!("Server started");
 
             let element = (self.view)(&state);
+            let mut labels = element.labels();
+
             backend_submitter.submit(element).unwrap_or_else(|e| {
                 tracing::error!("Failed to submit element: {}", e);
             });
@@ -127,9 +128,23 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
                         });
 
                         let element = (self.view)(&state);
+                        let new_labels = element.labels();
+
                         backend_submitter.submit(element).unwrap_or_else(|e| {
                             tracing::error!("Failed to submit element: {}", e);
                         });
+
+                        for label in labels {
+                            if !new_labels.contains(&label) {
+                                if let Some(label) = label {
+                                    backend_closer.submit(label).unwrap_or_else(|e| {
+                                        tracing::error!("Failed to submit a close request for this label: {}", e);
+                                    });
+                                }
+                            }
+                        }
+
+                        labels = new_labels;
                     }
                     Ok(directive) = directive_server.recv() => {
                         match directive {

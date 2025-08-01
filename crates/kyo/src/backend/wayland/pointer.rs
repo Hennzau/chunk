@@ -17,5 +17,38 @@ impl<Message: 'static + Send + Sync> PointerHandler for State<Message> {
         _pointer: &WlPointer,
         events: &[PointerEvent],
     ) {
+        for event in events {
+            let (x, y) = event.position;
+
+            self.throw_event(
+                Some(event.surface.id()),
+                match event.kind {
+                    PointerEventKind::Enter { serial: _ } => Event::PointerEntered,
+                    PointerEventKind::Leave { serial: _ } => Event::PointerLeaved,
+                    PointerEventKind::Motion { time: _ } => Event::PointerMoved { x, y },
+                    PointerEventKind::Press {
+                        time: _,
+                        button,
+                        serial: _,
+                    } => Event::PointerPressed { x, y, button },
+                    PointerEventKind::Release {
+                        time: _,
+                        button,
+                        serial: _,
+                    } => Event::PointerReleased { x, y, button },
+                    PointerEventKind::Axis {
+                        time: _,
+                        horizontal,
+                        vertical,
+                        source: _,
+                    } => Event::PointerScrolled {
+                        x,
+                        y,
+                        delta_x: horizontal.absolute,
+                        delta_y: vertical.absolute,
+                    },
+                },
+            );
+        }
     }
 }

@@ -8,6 +8,7 @@ pub mod prelude {
         Bottom,
         Left,
         Right,
+        Full,
     }
 
     #[derive(Default, Clone)]

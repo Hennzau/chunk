@@ -11,7 +11,10 @@ use smithay_client_toolkit::{
     shell::{
         WaylandSurface,
         wlr_layer::{Anchor, KeyboardInteractivity, Layer, LayerShell, LayerSurface},
-        xdg::XdgShell,
+        xdg::{
+            XdgShell,
+            window::{Window, WindowDecorations},
+        },
     },
 };
 
@@ -19,6 +22,7 @@ use wayland_client::{
     Connection, EventQueue,
     globals::{GlobalList, registry_queue_init},
 };
+use wgpu::{Adapter, Device, Instance, PowerPreference, Queue, RequestAdapterOptions};
 
 pub struct WaylandBackend<Message> {
     pub(crate) submitter: Submitter<Element<Message>>,
@@ -30,9 +34,15 @@ pub struct WaylandBackend<Message> {
     pub(crate) globals: GlobalList,
     pub(crate) event_queue: EventQueue<State<Message>>,
 
+    pub(crate) connection: Connection,
     pub(crate) compositor_state: CompositorState,
     pub(crate) xdg_shell: XdgShell,
     pub(crate) layer_shell: LayerShell,
+
+    pub(crate) instance: Instance,
+    pub(crate) adapter: Adapter,
+    pub(crate) device: Device,
+    pub(crate) queue: Queue,
 }
 
 impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message> {
@@ -49,7 +59,19 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
         let xdg_shell = XdgShell::bind(&globals, &qh)?;
         let layer_shell = LayerShell::bind(&globals, &qh)?;
 
+        let instance = Instance::default();
+
+        let adapter = instance
+            .request_adapter(&RequestAdapterOptions {
+                power_preference: PowerPreference::LowPower,
+                ..Default::default()
+            })
+            .await?;
+
+        let (device, queue) = adapter.request_device(&Default::default()).await?;
+
         Ok(Self {
+            connection,
             globals,
             event_queue,
             compositor_state,
@@ -60,6 +82,11 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
             server,
             closer,
             closer_server,
+
+            instance,
+            adapter,
+            device,
+            queue,
         })
     }
 
@@ -78,7 +105,12 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
         Box::pin(async move {
             tracing::info!("Wayland backend started");
 
-            let mut state = State::new(msg_submitter, &self.globals, &self.event_queue.handle());
+            let mut state = State::new(
+                msg_submitter,
+                self.closer.clone(),
+                &self.globals,
+                &self.event_queue.handle(),
+            );
 
             loop {
                 tokio::select! {
@@ -95,82 +127,29 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
                     }
                     Ok(element) = self.server.recv() => {
                         let mut lut = state.lut.clone();
-                        let mut new_labels = Vec::new();
 
-                        match element.downcast::<ContainerWidget<Message>>() {
-                            Ok(container) => {
-                                tracing::debug!("Received a container");
+                        for element in element.into_list() {
+                            if element.label().is_none() {
+                                tracing::warn!("You submitted a widget with no label, which is forbidden.");
 
-                                for element in container.elements() {
-                                    if element.label().is_none() {
-                                        continue;
-                                    }
-
-                                    let label = element.label().clone().unwrap(); // safe
-
-                                    if !lut.contains_key(&label) {
-                                        tracing::info!("New element received: {}", label);
-
-                                        let widget =
-                                            WaylandWidget::new(self.create_wayland_surface(&element)?, element);
-
-                                        new_labels.push(label.clone());
-
-                                        lut.insert(label.clone(), widget.id.clone());
-
-                                        state
-                                            .lut
-                                            .insert(label.clone(), widget.id.clone());
-
-                                        state
-                                            .views
-                                            .insert(widget.id.clone(), widget);
-                                    } else {
-                                        tracing::debug!("View already exists: {}", label);
-                                    }
-                                }
+                                continue;
                             }
-                            Err(element) => {
-                                tracing::debug!("Received a single element");
 
-                                if element.label().is_none() {
-                                    continue;
-                                }
+                            let label = element.label().unwrap();
 
-                                let label = element.label().clone().unwrap(); // safe
+                            if !lut.contains_key(&label) {
+                                let widget =
+                                    WaylandWidget::new(self.create_wayland_surface(&element)?, element);
 
-                                if !lut.contains_key(&label) {
-                                    tracing::info!("New element received: {}", label);
+                                lut.insert(label.clone(), widget.id.clone());
 
-                                    let widget =
-                                        WaylandWidget::new(self.create_wayland_surface(&element)?, element);
+                                state
+                                    .lut
+                                    .insert(label.clone(), widget.id.clone());
 
-                                    new_labels.push(label.clone());
-
-                                    lut.insert(label.clone(), widget.id.clone());
-
-                                    state
-                                        .lut
-                                        .insert(label.clone(), widget.id.clone());
-
-                                    state
-                                        .views
-                                        .insert(widget.id.clone(), widget);
-                                } else {
-                                    tracing::debug!("View already exists: {}", label);
-                                }
-                            }
-                        }
-
-                        for (label, id) in lut {
-                            if !new_labels.contains(&label) {
-                                tracing::debug!("Removing view: {}", label);
-
-                                if let Some(view) = state.views.remove(&id) {
-                                    view.destroy();
-                                }
-
-                                state.lut.remove(&label);
+                                state
+                                    .views
+                                    .insert(widget.id.clone(), widget);
                             }
                         }
 
@@ -222,6 +201,31 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
         layer
     }
 
+    pub(crate) fn create_window(
+        &self,
+        decorations: WindowDecorations,
+        label: String,
+        min_size: Option<(u32, u32)>,
+        max_size: Option<(u32, u32)>,
+    ) -> Window {
+        let wl_surface = self
+            .compositor_state
+            .create_surface(&self.event_queue.handle());
+
+        let window =
+            self.xdg_shell
+                .create_window(wl_surface, decorations, &self.event_queue.handle());
+
+        window.set_title(&label);
+        window.set_app_id(&label);
+        window.set_min_size(min_size);
+        window.set_max_size(max_size);
+
+        window.commit();
+
+        window
+    }
+
     pub(crate) fn create_wayland_surface(
         &self,
         element: &Element<Message>,
@@ -232,6 +236,25 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
                 Reserve::Bottom => (Anchor::BOTTOM, element.layout().height, (0, 0, 0, 0)),
                 Reserve::Left => (Anchor::LEFT, element.layout().width, (0, 0, 0, 0)),
                 Reserve::Right => (Anchor::RIGHT, element.layout().width, (0, 0, 0, 0)),
+                Reserve::Full => {
+                    let window = self.create_window(
+                        WindowDecorations::ServerDefault,
+                        element.label().ok_or_eyre(
+                            "Element must have a label in order to build a wayland layer",
+                        )?,
+                        None,
+                        None,
+                    );
+
+                    return Ok(SurfaceHandle::from_window(
+                        window,
+                        self.instance.clone(),
+                        self.connection.clone(),
+                        self.adapter.clone(),
+                        self.device.clone(),
+                        self.queue.clone(),
+                    ));
+                }
             },
             None => (
                 Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
@@ -252,6 +275,13 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
             margin,
         );
 
-        Ok(SurfaceHandle::Layer(layer))
+        Ok(SurfaceHandle::from_layer(
+            layer,
+            self.instance.clone(),
+            self.connection.clone(),
+            self.adapter.clone(),
+            self.device.clone(),
+            self.queue.clone(),
+        ))
     }
 }

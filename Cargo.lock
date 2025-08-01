@@ -527,6 +527,7 @@ dependencies = [
  "tracing-subscriber",
  "wayland-backend",
  "wayland-client",
+ "wgpu",
 ]
 
 [[package]]

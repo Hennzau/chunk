@@ -41,6 +41,7 @@ impl<Message: 'static + Send + Sync> CompositorHandler for State<Message> {
         surface: &WlSurface,
         _time: u32,
     ) {
+        self.throw_event(Some(surface.id()), Event::Render);
     }
 
     fn surface_enter(

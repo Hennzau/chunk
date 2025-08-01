@@ -23,6 +23,7 @@ impl<Message: 'static + Send + Sync> KeyboardHandler for State<Message> {
         _raw: &[u32],
         _keysyms: &[Keysym],
     ) {
+        self.throw_event(Some(surface.id()), Event::KeyboardEntered);
     }
 
     fn leave(
@@ -33,6 +34,7 @@ impl<Message: 'static + Send + Sync> KeyboardHandler for State<Message> {
         surface: &WlSurface,
         _: u32,
     ) {
+        self.throw_event(Some(surface.id()), Event::KeyboardLeaved);
     }
 
     fn press_key(
@@ -43,6 +45,12 @@ impl<Message: 'static + Send + Sync> KeyboardHandler for State<Message> {
         _: u32,
         event: KeyEvent,
     ) {
+        self.throw_event(
+            None,
+            Event::KeyPressed {
+                key: event.raw_code,
+            },
+        );
     }
 
     fn release_key(
@@ -53,6 +61,12 @@ impl<Message: 'static + Send + Sync> KeyboardHandler for State<Message> {
         _: u32,
         event: KeyEvent,
     ) {
+        self.throw_event(
+            None,
+            Event::KeyReleased {
+                key: event.raw_code,
+            },
+        );
     }
 
     fn update_modifiers(
@@ -65,5 +79,16 @@ impl<Message: 'static + Send + Sync> KeyboardHandler for State<Message> {
         _raw_modifiers: RawModifiers,
         _layout: u32,
     ) {
+        self.throw_event(
+            None,
+            Event::KeyModifiersChanged {
+                ctrl: modifiers.ctrl,
+                alt: modifiers.alt,
+                shift: modifiers.shift,
+                caps_lock: modifiers.caps_lock,
+                logo: modifiers.logo,
+                num_lock: modifiers.num_lock,
+            },
+        );
     }
 }

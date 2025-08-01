@@ -6,11 +6,10 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     seat::SeatState,
-    shell::{WaylandSurface, wlr_layer::LayerSurface, xdg::window::Window},
 };
 use wayland_backend::client::ObjectId;
 use wayland_client::{
-    Proxy, QueueHandle,
+    QueueHandle,
     globals::GlobalList,
     protocol::{wl_keyboard::WlKeyboard, wl_pointer::WlPointer},
 };
@@ -25,46 +24,9 @@ pub(crate) mod pointer;
 pub(crate) mod seat;
 pub(crate) mod window;
 
-pub(crate) enum SurfaceHandle {
-    Layer(LayerSurface),
-    Window(Window),
-}
-
-impl SurfaceHandle {
-    pub(crate) fn id(&self) -> ObjectId {
-        match self {
-            Self::Layer(layer) => layer.wl_surface().id(),
-            Self::Window(window) => window.wl_surface().id(),
-        }
-    }
-}
-
-pub(crate) struct WaylandWidget<Message> {
-    pub(crate) id: ObjectId,
-    pub(crate) surface: SurfaceHandle,
-
-    pub(crate) widget: Element<Message>,
-}
-
-impl<Message> WaylandWidget<Message> {
-    pub(crate) fn new(surface: SurfaceHandle, widget: Element<Message>) -> Self {
-        Self {
-            id: surface.id(),
-            surface,
-            widget,
-        }
-    }
-
-    pub(crate) fn destroy(&self) {
-        match &self.surface {
-            SurfaceHandle::Layer(layer) => layer.wl_surface().destroy(),
-            SurfaceHandle::Window(window) => window.wl_surface().destroy(),
-        }
-    }
-}
-
 pub(crate) struct State<Message> {
     pub(crate) submitter: Submitter<Message>,
+    pub(crate) closer: Submitter<String>,
 
     pub(crate) views: HashMap<ObjectId, WaylandWidget<Message>>,
     pub(crate) lut: HashMap<String, ObjectId>,
@@ -80,6 +42,7 @@ pub(crate) struct State<Message> {
 impl<Message: 'static + Send + Sync> State<Message> {
     pub(crate) fn new(
         submitter: Submitter<Message>,
+        closer: Submitter<String>,
         globals: &GlobalList,
         qh: &QueueHandle<Self>,
     ) -> Self {
@@ -92,15 +55,29 @@ impl<Message: 'static + Send + Sync> State<Message> {
             pointer: None,
 
             submitter,
+            closer,
+
             views: HashMap::new(),
             lut: HashMap::new(),
         }
     }
 
-    pub(crate) fn on_event(&mut self, id: &ObjectId, event: Event) {
-        if let Some(view) = self.views.get_mut(id) {
-            if let Err(e) = view.widget.on_event(event, self.submitter.clone()) {
-                tracing::error!("Error {}", e);
+    pub(crate) fn throw_event(&mut self, id: Option<ObjectId>, event: Event) {
+        if let Some(id) = id {
+            if let Some(view) = self.views.get_mut(&id) {
+                if let Some(label) = view.on_event(event.clone(), self.submitter.clone()) {
+                    self.closer.submit(label).unwrap_or_else(|e| {
+                        tracing::error!("Failed to submit a close request for this label: {}", e);
+                    });
+                }
+            }
+        } else {
+            for view in self.views.values_mut() {
+                if let Some(label) = view.on_event(event.clone(), self.submitter.clone()) {
+                    self.closer.submit(label).unwrap_or_else(|e| {
+                        tracing::error!("Failed to submit a close request for this label: {}", e);
+                    });
+                }
             }
         }
     }

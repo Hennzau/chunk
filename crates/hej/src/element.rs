@@ -72,6 +72,20 @@ impl<Message: 'static + Send + Sync> Element<Message> {
             widget: Box::new(MapWidget::new(self.widget, map)),
         }
     }
+
+    pub fn into_list(self) -> Vec<Element<Message>> {
+        match self.downcast::<ContainerWidget<Message>>() {
+            Ok(container) => container.elements,
+            Err(element) => vec![element],
+        }
+    }
+
+    pub fn labels(&self) -> Vec<Option<String>> {
+        match self.downcast_ref::<ContainerWidget<Message>>() {
+            Ok(container) => container.elements.iter().map(|e| e.label()).collect(),
+            Err(_) => vec![self.label()],
+        }
+    }
 }
 
 /// A trait that implements the conversion of a widget into an element.

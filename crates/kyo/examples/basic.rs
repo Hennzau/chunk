@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use kyo::prelude::{reexport::*, *};
 
 #[tokio::main]
@@ -19,14 +21,27 @@ async fn main() -> Result<()> {
 enum Message {
     Stop,
     Open,
+    Nothing,
 }
 
-#[derive(Default)]
-struct State {}
+struct State {
+    top: bool,
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self { top: true }
+    }
+}
 
 impl State {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::Nothing => {
+                self.top = false;
+
+                Task::none()
+            }
             Message::Stop => Task::stop(),
             Message::Open => Task::submit(empty().label("bar.left").layout(Layout {
                 width: 24,
@@ -34,26 +49,31 @@ impl State {
                 reserve: Some(Reserve::Left),
 
                 ..Default::default()
-            })),
+            }))
+            .then(Task::wait(Duration::from_millis(1000), Message::Nothing))
+            .then(Task::close("bar.left")),
         }
     }
 
     fn render(&self) -> Element<Message> {
-        container()
-            .with(empty().label("bar.bottom").layout(Layout {
-                width: 1920,
-                height: 24,
-                reserve: Some(Reserve::Top),
+        let elements = container().with(empty().label("bar.bottom").layout(Layout {
+            width: 1920,
+            height: 24,
+            reserve: Some(Reserve::Top),
 
-                ..Default::default()
-            }))
-            .with(empty().label("bar.top").layout(Layout {
+            ..Default::default()
+        }));
+
+        match self.top {
+            true => elements.with(empty().label("bar.top").layout(Layout {
                 width: 1920,
                 height: 24,
                 reserve: Some(Reserve::Bottom),
 
                 ..Default::default()
-            }))
-            .element()
+            })),
+            false => elements,
+        }
+        .element()
     }
 }

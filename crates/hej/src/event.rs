@@ -2,11 +2,16 @@
 //! a widget.
 
 /// The `Event` enum represents different types of events that can occur for a widget.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Event {
+    Close,
+
     /// Configuration event that provides the width and height for the widget in case
     /// the widget needs to be resized or initialized with specific dimensions.
-    Configure { width: u32, height: u32 },
+    Configure {
+        width: u32,
+        height: u32,
+    },
 
     /// Render event that indicates the widget should be redrawn. This event should only be used
     /// on the master Widget provided to the `Backend`.
@@ -19,10 +24,14 @@ pub enum Event {
     KeyboardLeaved,
 
     /// Key events for keyboard input.
-    KeyPressed { key: u32 },
+    KeyPressed {
+        key: u32,
+    },
 
     /// Key events for keyboard input when a key is released.
-    KeyReleased { key: u32 },
+    KeyReleased {
+        key: u32,
+    },
 
     /// Key modifiers changed, indicating a change in the state of modifier keys (Ctrl, Alt, Shift, etc.).
     KeyModifiersChanged {
@@ -41,13 +50,24 @@ pub enum Event {
     PointerLeaved,
 
     /// Pointer events for pointer input when the pointer is moved.
-    PointerMoved { x: f64, y: f64 },
+    PointerMoved {
+        x: f64,
+        y: f64,
+    },
 
     /// Pointer events for pointer input when a button is pressed.
-    PointerPressed { x: f64, y: f64, button: u32 },
+    PointerPressed {
+        x: f64,
+        y: f64,
+        button: u32,
+    },
 
     /// Pointer events for pointer input when a button is released.
-    PointerReleased { x: f64, y: f64, button: u32 },
+    PointerReleased {
+        x: f64,
+        y: f64,
+        button: u32,
+    },
 
     /// Pointer events for pointer input when the pointer is scrolled.
     PointerScrolled {
