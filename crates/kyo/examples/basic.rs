@@ -46,7 +46,7 @@ impl State {
             Message::Open => Task::submit(empty().label("bar.left").layout(Layout {
                 width: 24,
                 height: 1080,
-                reserve: Some(Reserve::Left),
+                placement: Placement::Left,
 
                 ..Default::default()
             }))
@@ -59,7 +59,7 @@ impl State {
         let elements = container().with(empty().label("bar.bottom").layout(Layout {
             width: 1920,
             height: 24,
-            reserve: Some(Reserve::Top),
+            placement: Placement::Bottom,
 
             ..Default::default()
         }));
@@ -68,7 +68,7 @@ impl State {
             true => elements.with(empty().label("bar.top").layout(Layout {
                 width: 1920,
                 height: 24,
-                reserve: Some(Reserve::Bottom),
+                placement: Placement::Top,
 
                 ..Default::default()
             })),

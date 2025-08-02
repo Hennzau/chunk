@@ -8,7 +8,9 @@ use crate::prelude::*;
 /// manage.
 pub trait Backend<Message>: Send + Sync {
     /// Creates a new instance of the backend.
-    fn new() -> impl Future<Output = Result<Self>> + Send + 'static
+    fn new(
+        msg_submitter: Submitter<Message>,
+    ) -> impl Future<Output = Result<Self>> + Send + 'static
     where
         Self: Sized;
 
@@ -18,13 +20,15 @@ pub trait Backend<Message>: Send + Sync {
     fn closer(&self) -> Submitter<String>;
 
     /// Runs the backend, processing elements and handling messages.
-    fn run(self, client: Submitter<Message>) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
+    fn run(self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>>
     where
         Self: Send;
 }
 
 /// An empty backend implementation that does not perform any operations.
 pub struct EmptyBackend<Message> {
+    pub(crate) _msg_submitter: Submitter<Message>,
+
     pub(crate) submitter: Submitter<Element<Message>>,
     pub(crate) server: Server<Element<Message>>,
 
@@ -32,12 +36,13 @@ pub struct EmptyBackend<Message> {
     pub(crate) _closer_server: Server<String>,
 }
 
-impl<Message: 'static> Backend<Message> for EmptyBackend<Message> {
-    async fn new() -> Result<Self> {
+impl<Message: 'static + Send + Sync> Backend<Message> for EmptyBackend<Message> {
+    async fn new(msg_submitter: Submitter<Message>) -> Result<Self> {
         let (submitter, server) = channel();
         let (closer, _closer_server) = channel();
 
         Ok(Self {
+            _msg_submitter: msg_submitter,
             submitter,
             server,
             closer,
@@ -53,10 +58,7 @@ impl<Message: 'static> Backend<Message> for EmptyBackend<Message> {
         self.submitter.clone()
     }
 
-    fn run(
-        mut self,
-        _client: Submitter<Message>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+    fn run(mut self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async move {
             tracing::info!("Backend started");
 

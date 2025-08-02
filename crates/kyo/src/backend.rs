@@ -18,10 +18,7 @@ use smithay_client_toolkit::{
     },
 };
 
-use wayland_client::{
-    Connection, EventQueue,
-    globals::{GlobalList, registry_queue_init},
-};
+use wayland_client::{Connection, EventQueue, globals::registry_queue_init};
 use wgpu::{Adapter, Device, Instance, PowerPreference, Queue, RequestAdapterOptions};
 
 pub struct WaylandBackend<Message> {
@@ -31,22 +28,24 @@ pub struct WaylandBackend<Message> {
     pub(crate) closer: Submitter<String>,
     pub(crate) closer_server: Server<String>,
 
-    pub(crate) globals: GlobalList,
-    pub(crate) event_queue: EventQueue<State<Message>>,
-
-    pub(crate) connection: Connection,
-    pub(crate) compositor_state: CompositorState,
-    pub(crate) xdg_shell: XdgShell,
-    pub(crate) layer_shell: LayerShell,
+    // It is important to first destroy state, then the wgpu primitives, then the wayland primitives
+    // At some point I should move to a ManuallyDrop struct
+    pub(crate) state: State<Message>,
 
     pub(crate) instance: Instance,
     pub(crate) adapter: Adapter,
     pub(crate) device: Device,
     pub(crate) queue: Queue,
+
+    pub(crate) event_queue: EventQueue<State<Message>>,
+    pub(crate) compositor_state: CompositorState,
+    pub(crate) xdg_shell: XdgShell,
+    pub(crate) layer_shell: LayerShell,
+    pub(crate) connection: Connection,
 }
 
 impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message> {
-    async fn new() -> Result<Self> {
+    async fn new(msg_submitter: Submitter<Message>) -> Result<Self> {
         let (submitter, server) = channel();
         let (closer, closer_server) = channel();
 
@@ -70,9 +69,10 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
 
         let (device, queue) = adapter.request_device(&Default::default()).await?;
 
+        let state = State::new(msg_submitter, closer.clone(), &globals, &qh);
+
         Ok(Self {
             connection,
-            globals,
             event_queue,
             compositor_state,
             xdg_shell,
@@ -87,6 +87,8 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
             adapter,
             device,
             queue,
+
+            state,
         })
     }
 
@@ -98,19 +100,9 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
         self.closer.clone()
     }
 
-    fn run(
-        mut self,
-        msg_submitter: Submitter<Message>,
-    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
+    fn run(mut self) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> {
         Box::pin(async move {
             tracing::info!("Wayland backend started");
-
-            let mut state = State::new(
-                msg_submitter,
-                self.closer.clone(),
-                &self.globals,
-                &self.event_queue.handle(),
-            );
 
             loop {
                 tokio::select! {
@@ -123,10 +115,10 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
                             }
                         }
 
-                        self.event_queue.dispatch_pending(&mut state).unwrap();
+                        self.event_queue.dispatch_pending(&mut self.state).unwrap();
                     }
                     Ok(element) = self.server.recv() => {
-                        let mut lut = state.lut.clone();
+                        let mut lut = self.state.lut.clone();
 
                         for element in element.into_list() {
                             if element.label().is_none() {
@@ -143,11 +135,11 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
 
                                 lut.insert(label.clone(), widget.id.clone());
 
-                                state
+                                self.state
                                     .lut
                                     .insert(label.clone(), widget.id.clone());
 
-                                state
+                                self.state
                                     .views
                                     .insert(widget.id.clone(), widget);
                             }
@@ -155,8 +147,8 @@ impl<Message: 'static + Send + Sync> Backend<Message> for WaylandBackend<Message
 
                     },
                     Ok(label) = self.closer_server.recv() => {
-                        if let Some(id) = state.lut.remove(&label) {
-                            if let Some(widget) = state.views.remove(&id) {
+                        if let Some(id) = self.state.lut.remove(&label) {
+                            if let Some(widget) = self.state.views.remove(&id) {
                                 widget.destroy();
                             }
                         }
@@ -230,37 +222,31 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
         &self,
         element: &Element<Message>,
     ) -> Result<SurfaceHandle> {
-        let (anchor, exclusive, margin) = match element.layout().reserve {
-            Some(reserve) => match reserve {
-                Reserve::Top => (Anchor::TOP, element.layout().height, (0, 0, 0, 0)),
-                Reserve::Bottom => (Anchor::BOTTOM, element.layout().height, (0, 0, 0, 0)),
-                Reserve::Left => (Anchor::LEFT, element.layout().width, (0, 0, 0, 0)),
-                Reserve::Right => (Anchor::RIGHT, element.layout().width, (0, 0, 0, 0)),
-                Reserve::Full => {
-                    let window = self.create_window(
-                        WindowDecorations::ServerDefault,
-                        element.label().ok_or_eyre(
-                            "Element must have a label in order to build a wayland layer",
-                        )?,
-                        None,
-                        None,
-                    );
+        let (anchor, exclusive) = match element.layout().placement {
+            Placement::Top => (Anchor::TOP, element.layout().height),
+            Placement::Bottom => (Anchor::BOTTOM, element.layout().height),
+            Placement::Left => (Anchor::LEFT, element.layout().width),
+            Placement::Right => (Anchor::RIGHT, element.layout().width),
+            Placement::Windowed => {
+                let window = self.create_window(
+                    WindowDecorations::ServerDefault,
+                    element.label().ok_or_eyre(
+                        "Element must have a label in order to build a wayland layer",
+                    )?,
+                    None,
+                    None,
+                );
 
-                    return Ok(SurfaceHandle::from_window(
-                        window,
-                        self.instance.clone(),
-                        self.connection.clone(),
-                        self.adapter.clone(),
-                        self.device.clone(),
-                        self.queue.clone(),
-                    ));
-                }
-            },
-            None => (
-                Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
-                0,
-                (0, 0, 0, 0),
-            ),
+                return Ok(SurfaceHandle::from_window(
+                    window,
+                    self.instance.clone(),
+                    self.connection.clone(),
+                    self.adapter.clone(),
+                    self.device.clone(),
+                    self.queue.clone(),
+                ));
+            }
+            Placement::None => (Anchor::TOP | Anchor::LEFT, 0),
         };
 
         let layer = self.create_layer(
@@ -269,10 +255,14 @@ impl<Message: 'static + Send + Sync> WaylandBackend<Message> {
                 .label()
                 .ok_or_eyre("Element must have a label in order to build a wayland layer")?,
             anchor,
-            KeyboardInteractivity::OnDemand,
+            match element.layout().keyboard_sensitivity {
+                KeyboardSensitivity::None => KeyboardInteractivity::None,
+                KeyboardSensitivity::OnClick => KeyboardInteractivity::OnDemand,
+                KeyboardSensitivity::Exclusive => KeyboardInteractivity::Exclusive,
+            },
             (element.layout().width, element.layout().height),
             exclusive,
-            margin,
+            (element.layout().y as i32, 0, 0, element.layout().x as i32),
         );
 
         Ok(SurfaceHandle::from_layer(

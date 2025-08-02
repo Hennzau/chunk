@@ -2,13 +2,22 @@ pub mod prelude {
     pub struct Renderer {}
 
     #[derive(Default, Clone)]
-    pub enum Reserve {
+    pub enum Placement {
         #[default]
+        None,
         Top,
         Bottom,
         Left,
         Right,
-        Full,
+        Windowed,
+    }
+
+    #[derive(Default, Clone)]
+    pub enum KeyboardSensitivity {
+        #[default]
+        None,
+        OnClick,
+        Exclusive,
     }
 
     #[derive(Default, Clone)]
@@ -19,7 +28,8 @@ pub mod prelude {
         pub width: u32,
         pub height: u32,
 
-        pub reserve: Option<Reserve>,
+        pub placement: Placement,
+        pub keyboard_sensitivity: KeyboardSensitivity,
     }
 
     pub struct Canvas {}

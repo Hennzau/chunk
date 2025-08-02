@@ -26,15 +26,7 @@ pub trait Widget<Message>: Send + Sync + Any {
     }
 
     fn layout(&self) -> Layout {
-        Layout {
-            x: 0,
-            y: 0,
-
-            width: 0,
-            height: 0,
-
-            reserve: None,
-        }
+        Layout::default()
     }
 
     fn label(&self) -> Option<String> {

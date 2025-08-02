@@ -77,15 +77,14 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
         }
     }
 
-    pub(crate) fn jobs<T: Backend<Message>>(
+    pub(crate) async fn jobs<T: Backend<Message>>(
         self,
-        backend: T,
         on_error: impl Fn(Report) -> Message + 'static + Send + Sync,
-    ) -> (
+    ) -> Result<(
         JoinHandle<Result<()>>,
         JoinHandle<Result<()>>,
         JoinHandle<()>,
-    ) {
+    )> {
         let (msg_submitter, mut msg_server) = channel::<Message>();
         let (directive_submitter, mut directive_server) =
             channel::<ApplicationDirective<Message>>();
@@ -105,6 +104,8 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
         }
 
         let mut state = (self.state)();
+
+        let backend = T::new(msg_submitter.clone()).await?;
 
         let backend_submitter = backend.submitter();
         let backend_closer = backend.closer();
@@ -171,9 +172,9 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
             Ok(())
         });
 
-        let backend = tokio::spawn(backend.run(msg_submitter));
+        let backend = tokio::spawn(backend.run());
 
-        (server, backend, pool)
+        Ok((server, backend, pool))
     }
 
     /// Runs the application with the specified backend.
@@ -213,9 +214,7 @@ impl<State: Send + 'static, Message: 'static + Send + Sync> Application<State, M
         self,
         on_error: impl Fn(Report) -> Message + 'static + Send + Sync,
     ) -> Result<()> {
-        let backend = T::new().await?;
-
-        let (server, backend, pool) = self.jobs(backend, on_error);
+        let (server, backend, pool) = self.jobs::<T>(on_error).await?;
 
         let ctrl_c = tokio::signal::ctrl_c();
 
